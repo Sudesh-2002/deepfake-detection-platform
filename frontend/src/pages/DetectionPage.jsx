@@ -1,27 +1,33 @@
 import { useState, useRef } from 'react'
+import { api } from '../services/api'
 
 const ACCEPT_MAP = {
-  video: 'video/*',
-  audio: 'audio/*',
-  image: 'image/*',
-  text: null,      // text area input
-  document: '.pdf,.doc,.docx',
-  multimodal: 'video/*,audio/*',
+  video:      'video/*',
+  audio:      'audio/*',
+  image:      'image/*',
+  text:       null,
+  document:   '.pdf,.doc,.docx',
+  multimodal: 'video/*',
 }
 
-const PLACEHOLDER_MAP = {
-  text: 'Paste text here to check if it was AI-generated...',
-  multimodal: null,
+// Map detection type id → api function
+const API_FN_MAP = {
+  video:      (file) => api.detectVideo(file),
+  audio:      (file) => api.detectAudio(file),
+  image:      (file) => api.detectImage(file),
+  document:   (file) => api.detectDocument(file),
+  multimodal: (file) => api.detectMultimodal(file),
+  text:       null, // handled separately
 }
 
 export default function DetectionPage({ type, onBack }) {
-  const [file, setFile] = useState(null)
+  const [file, setFile]           = useState(null)
   const [textInput, setTextInput] = useState('')
   const [isDragging, setIsDragging] = useState(false)
-  const [result, setResult] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const fileInputRef = useRef()
+  const [result, setResult]       = useState(null)
+  const [loading, setLoading]     = useState(false)
+  const [error, setError]         = useState(null)
+  const fileInputRef              = useRef()
 
   const isTextMode = type.id === 'text'
   const acceptAttr = ACCEPT_MAP[type.id]
@@ -30,7 +36,7 @@ export default function DetectionPage({ type, onBack }) {
     e.preventDefault()
     setIsDragging(false)
     const dropped = e.dataTransfer.files[0]
-    if (dropped) setFile(dropped)
+    if (dropped) { setFile(dropped); setResult(null); setError(null) }
   }
 
   const handleFileChange = (e) => {
@@ -45,31 +51,12 @@ export default function DetectionPage({ type, onBack }) {
     setError(null)
 
     try {
-      let response
-
+      let data
       if (isTextMode) {
-        // Text detection — JSON body
-        response = await fetch(`http://localhost:8000/detect/${type.id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: textInput }),
-        })
+        data = await api.detectText(textInput)
       } else {
-        // File detection — multipart form
-        const formData = new FormData()
-        formData.append('file', file)
-        response = await fetch(`http://localhost:8000/detect/${type.id}`, {
-          method: 'POST',
-          body: formData,
-        })
+        data = await API_FN_MAP[type.id](file)
       }
-
-      if (!response.ok) {
-        const err = await response.json()
-        throw new Error(err.detail || 'Detection failed')
-      }
-
-      const data = await response.json()
       setResult(data)
     } catch (err) {
       setError(err.message)
@@ -78,18 +65,30 @@ export default function DetectionPage({ type, onBack }) {
     }
   }
 
-  const canAnalyze = isTextMode ? textInput.trim().length > 20 : !!file
+  const canAnalyze = isTextMode
+    ? textInput.trim().length > 20
+    : !!file
 
-  const confidenceColor = (score) => {
+  // Colour helpers
+  const barColor = (score) => {
+    if (score >= 0.75) return 'bg-red-500'
+    if (score >= 0.4)  return 'bg-amber-500'
+    return 'bg-green-500'
+  }
+  const textColor = (score) => {
     if (score >= 0.75) return 'text-red-400'
-    if (score >= 0.4) return 'text-amber-400'
+    if (score >= 0.4)  return 'text-amber-400'
     return 'text-green-400'
   }
-
-  const confidenceLabel = (score) => {
-    if (score >= 0.75) return 'Likely Fake'
-    if (score >= 0.4) return 'Uncertain'
-    return 'Likely Real'
+  const verdictStyle = (score) => {
+    if (score >= 0.75) return 'bg-red-500/15 text-red-400 border-red-500/30'
+    if (score >= 0.4)  return 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+    return 'bg-green-500/15 text-green-400 border-green-500/30'
+  }
+  const verdictLabel = (score) => {
+    if (score >= 0.75) return '🚨 Likely Fake'
+    if (score >= 0.4)  return '⚠️ Uncertain'
+    return '✅ Likely Real'
   }
 
   return (
@@ -106,7 +105,7 @@ export default function DetectionPage({ type, onBack }) {
             </svg>
             Back
           </button>
-          <div className="w-px h-4 bg-white/10"></div>
+          <div className="w-px h-4 bg-white/10" />
           <span className="text-white font-semibold">
             {type.icon} {type.label} Detection
           </span>
@@ -114,15 +113,14 @@ export default function DetectionPage({ type, onBack }) {
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-12 space-y-6">
-        {/* Page title */}
+
+        {/* Title */}
         <div>
-          <h1 className="text-3xl font-black text-white mb-2">
-            {type.label} Analysis
-          </h1>
-          <p className="text-gray-400">{type.desc}</p>
+          <h1 className="text-3xl font-black text-white mb-2">{type.label} Analysis</h1>
+          <p className="text-gray-400 text-sm">{type.desc}</p>
         </div>
 
-        {/* Upload / Input Area */}
+        {/* Upload / Input card */}
         <div className={`rounded-2xl border ${type.border} bg-white/3 overflow-hidden`}>
           <div className="p-6">
             <label className="block text-xs text-gray-500 uppercase tracking-widest mb-4">
@@ -133,7 +131,7 @@ export default function DetectionPage({ type, onBack }) {
               <textarea
                 className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white placeholder-gray-600 text-sm resize-none focus:outline-none focus:border-violet-500/50 transition-colors"
                 rows={8}
-                placeholder={PLACEHOLDER_MAP.text}
+                placeholder="Paste text here to check if it was AI-generated…"
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
               />
@@ -146,8 +144,7 @@ export default function DetectionPage({ type, onBack }) {
                 className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all duration-200
                   ${isDragging
                     ? 'border-violet-500 bg-violet-500/10'
-                    : 'border-white/10 hover:border-white/20 hover:bg-white/3'
-                  }`}
+                    : 'border-white/10 hover:border-white/20 hover:bg-white/3'}`}
               >
                 <input
                   ref={fileInputRef}
@@ -175,12 +172,12 @@ export default function DetectionPage({ type, onBack }) {
             )}
           </div>
 
-          {/* Analyze Button */}
+          {/* Action bar */}
           <div className="border-t border-white/5 px-6 py-4 flex items-center justify-between bg-white/2">
             <span className="text-gray-600 text-xs">
               {isTextMode
                 ? `${textInput.length} characters`
-                : file ? `Ready to analyze` : 'No file selected'}
+                : file ? 'Ready to analyze' : 'No file selected'}
             </span>
             <button
               onClick={handleAnalyze}
@@ -188,8 +185,7 @@ export default function DetectionPage({ type, onBack }) {
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200
                 ${canAnalyze && !loading
                   ? `bg-gradient-to-r ${type.accent} text-white hover:opacity-90 shadow-lg`
-                  : 'bg-white/5 text-gray-600 cursor-not-allowed'
-                }`}
+                  : 'bg-white/5 text-gray-600 cursor-not-allowed'}`}
             >
               {loading ? (
                 <>
@@ -211,77 +207,109 @@ export default function DetectionPage({ type, onBack }) {
           </div>
         </div>
 
-        {/* Error */}
+        {/* Error banner */}
         {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-400 text-sm">
-            ⚠️ {error}
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-400 text-sm flex items-start gap-3">
+            <span className="text-lg">⚠️</span>
+            <div>
+              <p className="font-semibold mb-1">Detection failed</p>
+              <p className="text-red-300/80">{error}</p>
+              {error.includes('fetch') || error.includes('network') || error.includes('Failed') ? (
+                <p className="text-red-300/60 text-xs mt-2">
+                  Make sure the backend is running: <code className="bg-white/10 px-1 rounded">uvicorn main:app --reload</code>
+                </p>
+              ) : null}
+            </div>
           </div>
         )}
 
-        {/* Result */}
+        {/* Result card */}
         {result && (
           <div className={`rounded-2xl border ${type.border} bg-white/3 p-6 space-y-5`}>
             <h2 className="text-white font-bold text-lg">Analysis Result</h2>
 
-            {/* Score */}
-            <div className="flex items-center justify-between">
-              <span className="text-gray-400 text-sm">Fake Probability</span>
-              <span className={`text-2xl font-black ${confidenceColor(result.fake_probability)}`}>
-                {(result.fake_probability * 100).toFixed(1)}%
-              </span>
+            {/* Score + bar */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400 text-sm">Fake Probability</span>
+                <span className={`text-2xl font-black ${textColor(result.fake_probability)}`}>
+                  {(result.fake_probability * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 ${barColor(result.fake_probability)}`}
+                  style={{ width: `${result.fake_probability * 100}%` }}
+                />
+              </div>
             </div>
 
-            {/* Progress bar */}
-            <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-700 ${
-                  result.fake_probability >= 0.75
-                    ? 'bg-red-500'
-                    : result.fake_probability >= 0.4
-                    ? 'bg-amber-500'
-                    : 'bg-green-500'
-                }`}
-                style={{ width: `${result.fake_probability * 100}%` }}
-              />
-            </div>
-
-            {/* Verdict */}
-            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold
-              ${result.fake_probability >= 0.75
-                ? 'bg-red-500/15 text-red-400 border border-red-500/30'
-                : result.fake_probability >= 0.4
-                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                : 'bg-green-500/15 text-green-400 border border-green-500/30'
-              }`}>
-              {result.fake_probability >= 0.75 ? '🚨' : result.fake_probability >= 0.4 ? '⚠️' : '✅'}
-              {confidenceLabel(result.fake_probability)}
+            {/* Verdict badge */}
+            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border ${verdictStyle(result.fake_probability)}`}>
+              {verdictLabel(result.fake_probability)}
             </div>
 
             {/* Signals */}
-            {result.signals && result.signals.length > 0 && (
+            {result.signals?.length > 0 && (
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-widest mb-3">Detected Signals</p>
                 <ul className="space-y-2">
-                  {result.signals.map((signal, i) => (
+                  {result.signals.map((s, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm text-gray-300">
-                      <span className="text-gray-600 mt-0.5">▸</span>
-                      {signal}
+                      <span className="text-gray-600 mt-0.5 shrink-0">▸</span>
+                      {s}
                     </li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {/* Model used */}
+            {/* Multimodal breakdown */}
+            {result.breakdown && (
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-widest mb-3">Score Breakdown</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {Object.entries(result.breakdown).map(([key, val]) => (
+                    <div key={key} className="bg-white/5 rounded-xl p-3 text-center">
+                      <div className={`text-lg font-bold ${textColor(val)}`}>
+                        {(val * 100).toFixed(0)}%
+                      </div>
+                      <div className="text-xs text-gray-500 capitalize mt-1">
+                        {key.replace(/_/g, ' ')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Text stats */}
+            {result.stats && (
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-widest mb-3">Text Statistics</p>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  {Object.entries(result.stats)
+                    .filter(([k]) => !['repeated_bigrams', 'ai_phrase_hits'].includes(k))
+                    .map(([k, v]) => (
+                      <div key={k} className="flex justify-between bg-white/3 rounded-lg px-3 py-2">
+                        <span className="text-gray-500 capitalize">{k.replace(/_/g, ' ')}</span>
+                        <span className="text-white font-medium">{v}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {/* Model info */}
             {result.model && (
-              <p className="text-xs text-gray-600">
+              <p className="text-xs text-gray-600 pt-2 border-t border-white/5">
                 Model: <span className="text-gray-500">{result.model}</span>
               </p>
             )}
           </div>
         )}
 
-        {/* Info section */}
+        {/* Tags info */}
         <div className="rounded-xl bg-white/2 border border-white/6 p-5">
           <p className="text-xs text-gray-500 uppercase tracking-widest mb-3">What this checks</p>
           <div className="flex flex-wrap gap-2">
@@ -292,6 +320,7 @@ export default function DetectionPage({ type, onBack }) {
             ))}
           </div>
         </div>
+
       </main>
     </div>
   )

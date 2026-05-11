@@ -1,3 +1,5 @@
+import BackendStatus from '../components/BackendStatus'
+
 const DETECTION_TYPES = [
   {
     id: 'video',
@@ -82,11 +84,14 @@ export default function Dashboard({ onNavigate }) {
               Beta
             </span>
           </div>
-          <nav className="flex items-center gap-6 text-sm text-gray-400">
-            <span className="text-white font-medium">Dashboard</span>
-            <span className="hover:text-white cursor-pointer transition-colors">History</span>
-            <span className="hover:text-white cursor-pointer transition-colors">Docs</span>
-          </nav>
+          <div className="flex items-center gap-6">
+            <BackendStatus />
+            <nav className="flex items-center gap-6 text-sm text-gray-400">
+              <span className="text-white font-medium">Dashboard</span>
+              <span className="hover:text-white cursor-pointer transition-colors">History</span>
+              <span className="hover:text-white cursor-pointer transition-colors">Docs</span>
+            </nav>
+          </div>
         </div>
       </header>
 
@@ -157,7 +162,7 @@ export default function Dashboard({ onNavigate }) {
 
       {/* Footer */}
       <footer className="border-t border-white/5 py-8 text-center text-gray-600 text-sm">
-        DeepGuard · Built with React + FastAPI · Hosted on Vercel + Hugging Face
+        DeepGuard · Built with React + FastAPI · Hosted on Vercel + Render
       </footer>
     </div>
   )
